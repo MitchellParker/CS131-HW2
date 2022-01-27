@@ -7,6 +7,10 @@ type ('nonterminal, 'terminal) parse_tree =
   | Node of 'nonterminal * ('nonterminal, 'terminal) parse_tree list
   | Leaf of 'terminal
 
+
+type awksub_nonterminals =
+  | Expr | Term | Lvalue | Incrop | Binop | Num
+
 (** Converts from a hw1 style grammar to a hw2 style one *)
 let rec convert_grammar (start, rules) =
   start, match rules with
@@ -26,18 +30,18 @@ let rec parse_tree_leaves = function
 let match_empty lz_accept frag = Lazy.force lz_accept frag
 let match_nothing lz_accept frag = None
 
-let append_matchers matcher1 matcher2 lz_accept =
-  matcher1 (lazy (matcher2 lz_accept))
+let append_matchers matcher1 lz_matcher2 lz_accept =
+  matcher1  (lazy ((Lazy.force lz_matcher2)  lz_accept))
 
-let make_appended_matchers make_a_matcher ls =
+let make_appended_matchers make_a_matcher (ls: (awksub_nonterminals, string) symbol list ) =
   let rec mams = function
     | [] -> match_empty
-    | head::tail -> append_matchers (make_a_matcher head) (mams tail)
+    | head::tail -> append_matchers (make_a_matcher head) (lazy (mams tail))
   in mams ls
 
 let rec make_or_matcher make_a_matcher = function
   | [] -> match_nothing
-  | head::tail ->
+  | (head : (awksub_nonterminals, string) symbol list)::tail ->
     let head_matcher = make_a_matcher head
     and tail_matcher = make_or_matcher make_a_matcher tail
     in fun lz_accept frag ->
@@ -46,27 +50,24 @@ let rec make_or_matcher make_a_matcher = function
         | None -> tail_matcher lz_accept frag
         | _ -> ormatch
 
-let match_t t lz_accept = function
+let match_t (t : string) lz_accept = function
   | [] -> None
   | hd::tl -> if t = hd then Lazy.force lz_accept tl else None
 
-type awksub_nonterminals =
-  | Expr | Term | Lvalue | Incrop | Binop | Num
 
-let norec_make_match_nt prod mnt nt =
-  let alt = prod nt in
-  if alt = [] then match_empty else
-  let match_alt =
-    let match_symbol = function
-      | T t -> match_t t
-      | N n -> mnt n
-    in make_or_matcher (make_appended_matchers match_symbol)
-  in match_alt alt
+let make_match_nt prod =
+  let rec mnt (nt : awksub_nonterminals) =
+    let alt = prod nt in
+    if alt = [] then match_empty else
+    let match_alt =
+      let match_symbol = function
+        | T t -> match_t t
+        | N n -> mnt n
+      in make_or_matcher (make_appended_matchers match_symbol)
+    in match_alt alt
+  in mnt
 
 let make_matcher (start, prod) accept =
-  let f = ref (fun nt -> assert false) in
-  let rec_match_nt = (fun nt -> norec_make_match_nt prod !f nt) in
-  f := rec_match_nt;
-  rec_match_nt start (lazy accept)
+  make_match_nt prod start (lazy accept)
 
 let make_parser gram frag = None
