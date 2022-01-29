@@ -76,10 +76,10 @@ let make_match_nt prod match_any nt =
 
 let make_match_any prod = 
   let rec m_any = function
-    | RHS r -> make_match_rhs m_any r
-    | Alt a -> make_match_alt m_any a
     | Symb (N nt) -> make_match_nt prod m_any nt
     | Symb (T t) -> match_t t
+    | RHS r -> make_match_rhs m_any r
+    | Alt a -> make_match_alt m_any a
   in m_any
 
 let make_matcher (start, prod) =
@@ -87,53 +87,45 @@ let make_matcher (start, prod) =
 
 
 
-let parse_t t accept (frag, tree) =
-  match match_t t accept frag with
-    | Some suffix -> Some (Leaf t)
-    | _ -> None
+let parse_t t = 
+  Leaf t
 
-let make_parse_any prod = 
-  let rec m_any = function
-    | RHS r -> make_match_rhs m_any r
-    | Alt a -> make_match_alt m_any a
-    | Symb (N nt) -> make_match_nt prod m_any nt
-    | Symb (T t) -> parse_t t
-  in m_any
+let parse_nt prod matcher parser nt accept frag =
+  let alt_list = prod nt in
+  let rec fst_valid_rhs = function
+    | [] -> []
+    | hd::tl ->
+      match matcher (RHS hd) accept frag with
+        | None -> fst_valid_rhs tl
+        | Some success -> hd
+  in
+  let rec branches rhs fr =
+    match rhs with
+    | [] -> []
+    | hd::tl -> 
+      let tail_matcher = matcher (RHS tl) accept in
+      let matched = matcher (Symb hd) tail_matcher fr in
+      let parsed = parser hd tail_matcher fr in
+      match matched, parsed with
+        | None, _ -> assert false
+        | _, None -> assert false
+        | Some suffix, Some tree -> 
+          tree::(branches tl suffix)
+  in
+  Node (nt, branches (fst_valid_rhs alt_list) frag)
 
-(* let append_parsers parser1 parser2 accept frag =
-  parser1 (parser2 accept) frag
+let make_parse_symbol prod = 
+  let matcher = make_match_any prod in
+  let rec p_symb = fun symbol accept frag ->
+    match matcher (Symb symbol) accept frag with
+      | None -> None
+      | Some suffix -> Some (
+        match symbol with
+          | N nt -> parse_nt prod matcher p_symb nt accept suffix
+          | T t -> parse_t t
+      )
+  in p_symb
 
-let rec parse_rhs parse_symbol rhs =
-  match rhs with
-    | [] -> match_empty
-    | s::tl ->
-      let head_parser = parse_symbol s
-      and tail_parser = parse_rhs parse_symbol tl
-      in fun accept frag ->
-        let andparse = head_parser accept frag in
-        match andparse with
-          | None -> None
-          | Some suffix, subtree -> 
-            subtree::(tail_parser accept suffix)
-
-and parse_alt alt accept frag =
-  match alt with
-    | [] -> match_nothing accept frag
-    | rhs::tl ->
-      match parse_rhs 
-
-and parse_nt prod nt accept frag =
-  let match_nt = make_match_nt prod in
-  match match_nt nt accept frag with
-    | None -> None
-    | Some suffix -> fun nnext -> 
-      match next accept frag nnext with
-        | None -> None
-        | Some ans  *)
-
-
-let make_parser (start, prod) frag = None
-  (* let accept_empty = function
-    | [] -> Some []
-    | _ -> None
-  in parse_nt prod start accept_empty *)
+let make_parser (start, prod) =
+  let accept_empty_suffix = function _::_ -> None | [] -> Some [] in
+  make_parse_symbol prod (N start) accept_empty_suffix
